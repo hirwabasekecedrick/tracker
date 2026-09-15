@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
+    "prisma:seed": "tsx prisma/seed.ts",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
   },
@@ -16,8 +17,12 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -31,6 +36,7 @@
     "nodemon": "^3.1.14",
     "prisma": "^6.19.3",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3"
   }
 }

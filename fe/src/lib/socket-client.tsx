@@ -80,14 +80,13 @@ const createQueueId = () => {
 };
 
 const getSocketUrl = () => {
-  if (typeof window === "undefined") {
-    return "http://localhost:4000";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!apiUrl) {
+    throw new Error("NEXT_PUBLIC_API_URL is required");
   }
 
-  const host = window.location.hostname;
-  const protocol = window.location.protocol === "https:" ? "https" : "http";
-
-  return `${protocol}://${host}:4000`;
+  return apiUrl;
 };
 
 export default function LocationTrackerClient({ user, token }: { user: AppUser; token: string }) {
@@ -99,14 +98,14 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
   const [location, setLocation] = useState<LocationUpdate | null>(null);
   const [connected, setConnected] = useState(false);
   const [journeyActive, setJourneyActive] = useState(false);
-  const [name, setName] = useState(user.name || "Driver 1");
-  const [vehicleNumber, setVehicleNumber] = useState(user.vehicleNumber || "Vehicle 01");
-  const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || "+1 555 000 0000");
+  const [name, setName] = useState(user.name || process.env.NEXT_PUBLIC_DEFAULT_RIDER_NAME || "");
+  const [vehicleNumber, setVehicleNumber] = useState(user.vehicleNumber || process.env.NEXT_PUBLIC_DEFAULT_VEHICLE_NUMBER || "");
+  const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || process.env.NEXT_PUBLIC_DEFAULT_RIDER_PHONE || "");
 
   useEffect(() => {
-    setName(user.name || "Driver 1");
-    setVehicleNumber(user.vehicleNumber || "Vehicle 01");
-    setPhoneNumber(user.phoneNumber || "+1 555 000 0000");
+    setName(user.name || process.env.NEXT_PUBLIC_DEFAULT_RIDER_NAME || "");
+    setVehicleNumber(user.vehicleNumber || process.env.NEXT_PUBLIC_DEFAULT_VEHICLE_NUMBER || "");
+    setPhoneNumber(user.phoneNumber || process.env.NEXT_PUBLIC_DEFAULT_RIDER_PHONE || "");
   }, [user]);
 
   useEffect(() => {
@@ -302,21 +301,21 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         <TextField
           label="Driver name"
           value={name}
-          onChange={(event) => setName(event.target.value || "Driver 1")}
+          onChange={(event) => setName(event.target.value)}
           size="small"
           sx={{ input: { color: "#f8fafc" }, label: { color: "#cbd5e1" } }}
         />
         <TextField
           label="Vehicle number"
           value={vehicleNumber}
-          onChange={(event) => setVehicleNumber(event.target.value || "Vehicle 01")}
+          onChange={(event) => setVehicleNumber(event.target.value)}
           size="small"
           sx={{ input: { color: "#f8fafc" }, label: { color: "#cbd5e1" } }}
         />
         <TextField
           label="Phone number"
           value={phoneNumber}
-          onChange={(event) => setPhoneNumber(event.target.value || "+1 555 000 0000")}
+          onChange={(event) => setPhoneNumber(event.target.value)}
           size="small"
           sx={{ input: { color: "#f8fafc" }, label: { color: "#cbd5e1" } }}
         />

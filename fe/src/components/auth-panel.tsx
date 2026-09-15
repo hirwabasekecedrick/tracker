@@ -1,13 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Box, Button, Card, CardContent, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Button, Card, CardContent, Stack, TextField, Typography } from "@mui/material";
 import { authStorage, type AppUser } from "@/lib/auth";
-
-const DEMO_ACCOUNTS = [
-  { email: "admin@tracker.app", password: "admin123", role: "admin", label: "Admin account" },
-  { email: "driver@tracker.app", password: "driver123", role: "driver", label: "Driver account" },
-];
 
 type AuthPanelProps = {
   onLogin: (user: AppUser, token: string) => void;
@@ -16,8 +11,8 @@ type AuthPanelProps = {
 };
 
 export default function AuthPanel({ onLogin, onLogout, user }: AuthPanelProps) {
-  const [email, setEmail] = useState("driver@tracker.app");
-  const [password, setPassword] = useState("driver123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -26,11 +21,11 @@ export default function AuthPanel({ onLogin, onLogout, user }: AuthPanelProps) {
     setError("");
 
     try {
-      const apiBase =
-        process.env.NEXT_PUBLIC_API_URL ||
-        (typeof window !== "undefined"
-          ? `${window.location.protocol}//${window.location.hostname}:4000`
-          : "http://localhost:4000");
+      const apiBase = process.env.NEXT_PUBLIC_API_URL;
+
+      if (!apiBase) {
+        throw new Error("NEXT_PUBLIC_API_URL is required");
+      }
 
       const response = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
@@ -100,26 +95,6 @@ export default function AuthPanel({ onLogin, onLogout, user }: AuthPanelProps) {
             size="small"
             fullWidth
           />
-
-          <TextField
-            select
-            label="Demo account"
-            value={email}
-            onChange={(event) => {
-              const selected = DEMO_ACCOUNTS.find((account) => account.email === event.target.value);
-              if (!selected) return;
-              setEmail(selected.email);
-              setPassword(selected.password);
-            }}
-            size="small"
-            fullWidth
-          >
-            {DEMO_ACCOUNTS.map((account) => (
-              <MenuItem key={account.email} value={account.email}>
-                {account.label}
-              </MenuItem>
-            ))}
-          </TextField>
 
           {error ? (
             <Typography variant="body2" color="error">

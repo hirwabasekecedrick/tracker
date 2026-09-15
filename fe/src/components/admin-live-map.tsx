@@ -12,11 +12,7 @@ const getApiBase = () => {
     return process.env.NEXT_PUBLIC_API_URL;
   }
 
-  if (typeof window === "undefined") {
-    return "http://localhost:4000";
-  }
-
-  return `${window.location.protocol}//${window.location.hostname}:4000`;
+  throw new Error("NEXT_PUBLIC_API_URL is required");
 };
 
 const getMarkerIcon = (user: UserJourneyState) =>
@@ -170,7 +166,7 @@ export default function AdminLiveMap({ token }: { token: string }) {
                                 : "Available for deliveries"}
                           </Typography>
                           <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>Vehicle:</strong> {user.vehicleNumber || "Vehicle 01"}
+                            <strong>Vehicle:</strong> {user.vehicleNumber || "Unassigned"}
                           </Typography>
                           <Typography variant="body2">
                             <strong>Phone:</strong> {user.phoneNumber || "N/A"}
@@ -212,7 +208,7 @@ export default function AdminLiveMap({ token }: { token: string }) {
                     </Typography>
                     <Box component="div" sx={{ mt: 0.5 }}>
                       <Typography variant="caption" color="text.secondary">
-                        {user.vehicleNumber || "Vehicle 01"} • {user.phoneNumber || "N/A"}
+                        {user.vehicleNumber || "Unassigned"} • {user.phoneNumber || "N/A"}
                       </Typography>
                     </Box>
                   </Box>

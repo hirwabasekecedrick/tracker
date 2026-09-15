@@ -5,16 +5,35 @@ import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import { compare } from "bcryptjs";
 
 const app = express();
 const prisma = new PrismaClient();
 const server = http.createServer(app);
-const JWT_SECRET = process.env.JWT_SECRET || "tracker-demo-secret";
-const databaseConfigured = Boolean(process.env.DATABASE_URL);
-const configuredOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000")
+const JWT_SECRET = process.env.JWT_SECRET;
+const configuredOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const PORT = Number(process.env.PORT);
+const SERVER_PUBLIC_URL = process.env.SERVER_PUBLIC_URL;
+const databaseConfigured = Boolean(process.env.DATABASE_URL);
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET is required");
+}
+
+if (!configuredOrigins.length) {
+  throw new Error("CORS_ORIGINS is required");
+}
+
+if (!Number.isInteger(PORT) || PORT < 1) {
+  throw new Error("PORT must be a valid port number");
+}
+
+if (!SERVER_PUBLIC_URL) {
+  throw new Error("SERVER_PUBLIC_URL is required");
+}
 
 const isAllowedOrigin = (origin: string | undefined) => !origin || configuredOrigins.includes(origin);
 
@@ -60,17 +79,37 @@ type UserJourneyState = {
 type Account = {
   id: string;
   email: string;
-  password: string;
+  passwordHash: string;
   name: string;
   role: AccountRole;
   vehicleNumber: string;
   phoneNumber: string;
 };
 
-const accounts = new Map<string, Account>([
-  ["admin@tracker.app", { id: "admin-1", email: "admin@tracker.app", password: "admin123", name: "Admin User", role: "admin", vehicleNumber: "ADMIN-01", phoneNumber: "+1 000 000 0000" }],
-  ["driver@tracker.app", { id: "driver-1", email: "driver@tracker.app", password: "driver123", name: "Driver One", role: "driver", vehicleNumber: "TRK-101", phoneNumber: "+1 555 010 1010" }],
-]);
+const accounts = new Map<string, Account>();
+
+const getAccountById = (userId: string) => [...accounts.values()].find((account) => account.id === userId);
+
+const loadAccounts = async () => {
+  if (!databaseConfigured) {
+    throw new Error("DATABASE_URL is required to load accounts");
+  }
+
+  const storedAccounts = await prisma.account.findMany();
+  accounts.clear();
+
+  for (const account of storedAccounts) {
+    accounts.set(account.email.toLowerCase(), {
+      id: account.id,
+      email: account.email,
+      passwordHash: account.passwordHash,
+      name: account.name,
+      role: account.role as AccountRole,
+      vehicleNumber: account.vehicleNumber,
+      phoneNumber: account.phoneNumber,
+    });
+  }
+};
 
 const users = new Map<string, UserJourneyState>();
 
@@ -117,7 +156,7 @@ const restorePersistedJourneys = async () => {
       continue;
     }
 
-    const account = [...accounts.values()].find((entry) => entry.id === journey.userId);
+    const account = getAccountById(journey.userId);
     if (!account) {
       continue;
     }
@@ -254,7 +293,7 @@ app.get("/health", async (_req: Request, res: Response) => {
   }
 });
 
-app.post("/api/auth/login", (req: Request, res: Response) => {
+app.post("/api/auth/login", async (req: Request, res: Response) => {
   const { email, password } = req.body as { email?: string; password?: string };
 
   if (!email || !password) {
@@ -264,7 +303,7 @@ app.post("/api/auth/login", (req: Request, res: Response) => {
 
   const account = accounts.get(email.toLowerCase());
 
-  if (!account || account.password !== password) {
+  if (!account || !(await compare(password, account.passwordHash))) {
     res.status(401).json({ message: "Invalid credentials" });
     return;
   }
@@ -313,7 +352,7 @@ app.post("/api/journey/start", (req: Request, res: Response) => {
     return;
   }
 
-  const account = [...accounts.values()].find((entry) => entry.id === userId);
+  const account = getAccountById(userId);
 
   if (!account) {
     res.status(404).json({ message: "User not found" });
@@ -322,7 +361,7 @@ app.post("/api/journey/start", (req: Request, res: Response) => {
 
   const record = getUserState(userId, account);
   record.name = name || account.name || "User";
-  record.vehicleNumber = vehicleNumber || account.vehicleNumber || "Vehicle 01";
+  record.vehicleNumber = vehicleNumber || account.vehicleNumber;
   record.phoneNumber = phoneNumber || account.phoneNumber || "N/A";
   record.deliveryStatus = "on_delivery";
   record.active = true;
@@ -347,7 +386,7 @@ app.post("/api/journey/stop", (req: Request, res: Response) => {
     return;
   }
 
-  const account = [...accounts.values()].find((entry) => entry.id === userId);
+  const account = getAccountById(userId);
 
   if (!account) {
     res.status(404).json({ message: "User not found" });
@@ -408,7 +447,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const account = [...accounts.values()].find((entry) => entry.id === user?.userId);
+    const account = user ? getAccountById(user.userId) : undefined;
 
     if (!account) {
       socket.emit("error", { message: "User not found" });
@@ -423,7 +462,7 @@ io.on("connection", (socket) => {
 
     const record = getUserState(account.id, account);
     record.name = name || account.name || "User";
-    record.vehicleNumber = vehicleNumber || account.vehicleNumber || "Vehicle 01";
+    record.vehicleNumber = vehicleNumber || account.vehicleNumber;
     record.phoneNumber = phoneNumber || account.phoneNumber || "N/A";
     record.deliveryStatus = "on_delivery";
     record.active = true;
@@ -448,7 +487,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const account = [...accounts.values()].find((entry) => entry.id === user?.userId);
+    const account = user ? getAccountById(user.userId) : undefined;
 
     if (!account) {
       socket.emit("error", { message: "User not found" });
@@ -488,7 +527,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const account = [...accounts.values()].find((entry) => entry.id === user.userId);
+    const account = getAccountById(user.userId);
 
     if (!account) {
       socket.emit("error", { message: "User not found" });
@@ -500,7 +539,7 @@ io.on("connection", (socket) => {
     const record = getUserState(account.id, account);
 
     record.name = name || account.name || "User";
-    record.vehicleNumber = vehicleNumber || account.vehicleNumber || "Vehicle 01";
+    record.vehicleNumber = vehicleNumber || account.vehicleNumber;
     record.phoneNumber = phoneNumber || account.phoneNumber || "N/A";
     record.updatedAt = timestamp;
     record.lastLocation = { latitude, longitude, timestamp };
@@ -528,12 +567,11 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = Number(process.env.PORT) || 4000;
-
-void restorePersistedJourneys()
+void loadAccounts()
+  .then(restorePersistedJourneys)
   .then(() => {
     server.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Server running on ${SERVER_PUBLIC_URL}`);
     });
   })
   .catch((error) => {

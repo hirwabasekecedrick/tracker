@@ -24,9 +24,12 @@ cd be
 npm ci
 npx prisma generate
 npx prisma db push
+npm run prisma:seed
 npm run build
 npm start
 ```
+
+`SEED_ACCOUNTS_JSON` is used only by `npm run prisma:seed`. The running backend reads hashed accounts from the `Account` table and does not need account passwords in its runtime configuration.
 
 The backend host must support long-lived WebSocket connections. Expose `/health` for health checks.
 
