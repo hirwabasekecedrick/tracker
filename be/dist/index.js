@@ -248,6 +248,41 @@ app.get("/api/journey/users", (req, res) => {
     }
     res.json(Array.from(users.values()));
 });
+app.get("/api/journey/history", async (req, res) => {
+    const user = getAuthenticatedUser(req);
+    if (!user || user.role !== "admin") {
+        res.status(403).json({ message: "Admin access required" });
+        return;
+    }
+    try {
+        const journeys = await prisma.journey.findMany({
+            orderBy: { startedAt: "desc" },
+            include: { points: { orderBy: { timestamp: "asc" } } },
+        });
+        res.json(journeys.map((journey) => {
+            const account = getAccountById(journey.userId);
+            return {
+                id: journey.id,
+                userId: journey.userId,
+                driverName: journey.name,
+                email: account?.email || "",
+                vehicleNumber: journey.vehicleNumber,
+                startedAt: journey.startedAt.getTime(),
+                endedAt: journey.endedAt?.getTime() || null,
+                active: journey.active,
+                points: journey.points.map((point) => ({
+                    latitude: point.latitude,
+                    longitude: point.longitude,
+                    timestamp: point.timestamp.getTime(),
+                })),
+            };
+        }));
+    }
+    catch (error) {
+        console.error("Unable to load journey history", error);
+        res.status(500).json({ message: "Unable to load journey history" });
+    }
+});
 app.post("/api/journey/start", (req, res) => {
     const authenticatedUser = getAuthenticatedUser(req);
     const { userId, name, vehicleNumber, phoneNumber } = req.body;
@@ -333,11 +368,13 @@ io.on("connection", (socket) => {
         }
         if (!payload || typeof payload !== "object") {
             socket.emit("error", { message: "Invalid journey start payload" });
+            acknowledge?.({ ok: false });
             return;
         }
         const account = user ? getAccountById(user.userId) : undefined;
         if (!account) {
             socket.emit("error", { message: "User not found" });
+            acknowledge?.({ ok: false });
             return;
         }
         const { name, vehicleNumber, phoneNumber } = payload;
@@ -369,6 +406,7 @@ io.on("connection", (socket) => {
         const account = user ? getAccountById(user.userId) : undefined;
         if (!account) {
             socket.emit("error", { message: "User not found" });
+            acknowledge?.({ ok: false });
             return;
         }
         const record = getUserState(account.id, account);

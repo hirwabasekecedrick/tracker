@@ -73,12 +73,15 @@ function FitToUsers({ users }: { users: UserJourneyState[] }) {
 export default function AdminLiveMap({ token }: { token: string }) {
   const [users, setUsers] = useState<UserJourneyState[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
+  const [apiConnected, setApiConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     const apiBase = getApiBase();
     const socket = io(apiBase, {
-      transports: ["websocket"],
+      transports: ["polling", "websocket"],
+      upgrade: true,
+      timeout: 15000,
       reconnection: true,
       auth: token ? { token } : undefined,
     });
@@ -93,27 +96,50 @@ export default function AdminLiveMap({ token }: { token: string }) {
       setSocketConnected(false);
     });
 
+    socket.on("connect_error", (error) => {
+      setSocketConnected(false);
+      console.error("Dispatch socket connection error", error);
+    });
+
     socket.on("usersUpdate", (payload: UserJourneyState[]) => {
       setUsers(Array.isArray(payload) ? payload : []);
     });
 
-    fetch(`${apiBase}/api/journey/users`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    })
-      .then((res) => res.json())
-      .then((data) => setUsers(Array.isArray(data) ? data : []))
-      .catch(() => setUsers([]));
+    const refreshUsers = () => {
+      fetch(`${apiBase}/api/journey/users`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`Fleet request failed with ${res.status}`);
+          }
+          return res.json();
+        })
+        .then((data) => {
+          setUsers(Array.isArray(data) ? data : []);
+          setApiConnected(true);
+        })
+        .catch((error) => {
+          setApiConnected(false);
+          console.error("Unable to refresh fleet state", error);
+        });
+    };
+
+    refreshUsers();
+    const refreshTimer = window.setInterval(refreshUsers, 5000);
 
     return () => {
       socket.off("connect");
       socket.off("disconnect");
+      socket.off("connect_error");
       socket.off("usersUpdate");
       socket.disconnect();
+      window.clearInterval(refreshTimer);
     };
   }, [token]);
 
   const visibleUsers = useMemo(
-    () => users.filter((user) => user.active || user.lastLocation),
+    () => users.filter((user) => user.active),
     [users]
   );
 
@@ -121,8 +147,8 @@ export default function AdminLiveMap({ token }: { token: string }) {
     <Box sx={{ display: "grid", gap: 2 }}>
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
         <Chip
-          label={socketConnected ? "Socket live" : "Connecting..."}
-          color={socketConnected ? "success" : "warning"}
+          label={socketConnected ? "Realtime socket" : apiConnected ? "Live polling fallback" : "Connecting..."}
+          color={socketConnected || apiConnected ? "success" : "warning"}
         />
         <Chip label={`${visibleUsers.length} user(s)`} color="primary" />
       </Stack>

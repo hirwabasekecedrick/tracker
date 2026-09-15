@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { Box, Button, Chip, Stack, TextField, Typography } from "@mui/material";
 import type { AppUser } from "@/lib/auth";
+import dynamic from "next/dynamic";
+import type { LocationPoint } from "@/lib/types";
+
+const DriverLiveMap = dynamic(() => import("@/components/driver-live-map"), {
+  ssr: false,
+  loading: () => <Typography variant="body2" color="text.secondary">Loading live map...</Typography>,
+});
 
 type LocationUpdate = {
   userId: string;
@@ -96,17 +103,28 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
   const userIdRef = useRef<string>(user.id);
   const [status, setStatus] = useState("Waiting for location");
   const [location, setLocation] = useState<LocationUpdate | null>(null);
+  const [routePath, setRoutePath] = useState<LocationPoint[]>([]);
   const [connected, setConnected] = useState(false);
   const [journeyActive, setJourneyActive] = useState(false);
   const [name, setName] = useState(user.name || process.env.NEXT_PUBLIC_DEFAULT_RIDER_NAME || "");
   const [vehicleNumber, setVehicleNumber] = useState(user.vehicleNumber || process.env.NEXT_PUBLIC_DEFAULT_VEHICLE_NUMBER || "");
   const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || process.env.NEXT_PUBLIC_DEFAULT_RIDER_PHONE || "");
+  const journeyActiveRef = useRef(false);
+  const riderDetailsRef = useRef({ name, vehicleNumber, phoneNumber });
 
   useEffect(() => {
     setName(user.name || process.env.NEXT_PUBLIC_DEFAULT_RIDER_NAME || "");
     setVehicleNumber(user.vehicleNumber || process.env.NEXT_PUBLIC_DEFAULT_VEHICLE_NUMBER || "");
     setPhoneNumber(user.phoneNumber || process.env.NEXT_PUBLIC_DEFAULT_RIDER_PHONE || "");
   }, [user]);
+
+  useEffect(() => {
+    journeyActiveRef.current = journeyActive;
+  }, [journeyActive]);
+
+  useEffect(() => {
+    riderDetailsRef.current = { name, vehicleNumber, phoneNumber };
+  }, [name, phoneNumber, vehicleNumber]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -120,7 +138,9 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
     }
 
     const socket = io(getSocketUrl(), {
-      transports: ["websocket"],
+      transports: ["polling", "websocket"],
+      upgrade: true,
+      timeout: 15000,
       reconnection: true,
       auth: {
         token,
@@ -175,7 +195,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
 
     const handleConnect = () => {
       setConnected(true);
-      setStatus(journeyActive ? "On delivery" : "Available for deliveries");
+      setStatus(journeyActiveRef.current ? "On delivery" : "Available for deliveries");
       flushEventQueue();
     };
 
@@ -184,16 +204,21 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
       setStatus("Disconnected from tracker");
     };
 
+    const handleConnectError = (error: Error) => {
+      setConnected(false);
+      setStatus(`Connection error: ${error.message}`);
+      console.error("Tracker socket connection error", error);
+    };
+
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const payload: LocationUpdate = {
           userId: userIdRef.current,
-          name,
-          vehicleNumber,
-          phoneNumber,
+          ...riderDetailsRef.current,
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           timestamp: Date.now(),
@@ -201,7 +226,12 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
 
         setLocation(payload);
 
-        if (journeyActive) {
+        if (journeyActiveRef.current) {
+          setRoutePath((currentPath) => [...currentPath, {
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+            timestamp: payload.timestamp,
+          }]);
           const queuedPayload: LocationEvent = {
             ...payload,
             type: "locationUpdate",
@@ -219,14 +249,25 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         }
       },
       (error) => {
-        console.error("Geolocation error:", error);
         const messages: Record<number, string> = {
           1: "Location permission was denied. Please allow location access and reload the page.",
           2: "Location is unavailable on this device right now.",
           3: "Location request timed out. Please try again.",
         };
+        const code = typeof error?.code === "number" ? error.code : 0;
+        const message = typeof error?.message === "string" ? error.message : "The device did not provide a location.";
 
-        setStatus(messages[error.code] ?? `Location access error: ${error.message}`);
+        setStatus(messages[code] ?? `Location access error: ${message}`);
+
+        if (code === 1) {
+          console.warn("Location permission was denied");
+        } else if (code === 2) {
+          console.warn("Location is unavailable on this device");
+        } else if (code === 3) {
+          console.warn("Location request timed out");
+        } else {
+          console.warn("Location error", { code, message });
+        }
       },
       {
         enableHighAccuracy: true,
@@ -239,10 +280,11 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
       navigator.geolocation.clearWatch(watchId);
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
       socket.disconnect();
       flushEventQueueRef.current = null;
     };
-  }, [journeyActive, name, phoneNumber, token, vehicleNumber]);
+  }, [token, user.id]);
 
   const startJourney = () => {
     if (!token) {
@@ -254,14 +296,18 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
       eventId: createQueueId(),
       payload: {
         userId: userIdRef.current,
-        name,
-        vehicleNumber,
-        phoneNumber,
+        ...riderDetailsRef.current,
       },
     };
     const queue = [...readEventQueue(userIdRef.current), event];
     writeEventQueue(userIdRef.current, queue);
     setJourneyActive(true);
+    journeyActiveRef.current = true;
+    setRoutePath(
+      location
+        ? [{ latitude: location.latitude, longitude: location.longitude, timestamp: location.timestamp }]
+        : []
+    );
     setStatus(socketRef.current?.connected ? "Starting delivery" : "Start queued for reconnection");
 
     flushEventQueueRef.current?.();
@@ -280,6 +326,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
     const queue = [...readEventQueue(userIdRef.current), event];
     writeEventQueue(userIdRef.current, queue);
     setJourneyActive(false);
+    journeyActiveRef.current = false;
     setStatus(socketRef.current?.connected ? "Ending delivery" : "Stop queued for reconnection");
 
     flushEventQueueRef.current?.();
@@ -357,6 +404,8 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
           </Typography>
         )}
       </Box>
+
+      {journeyActive ? <DriverLiveMap path={routePath} /> : null}
     </Box>
   );
 }

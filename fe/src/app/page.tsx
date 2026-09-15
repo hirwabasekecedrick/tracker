@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Box, Grid, Typography } from "@mui/material";
+import { Box, Grid, Link, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import LocationTrackerClient from "@/lib/socket-client";
 import AuthPanel from "@/components/auth-panel";
@@ -12,10 +12,25 @@ const AdminLiveMap = dynamic(() => import("@/components/admin-live-map"), {
   loading: () => <Typography variant="body2" color="text.secondary">Loading map...</Typography>,
 });
 
+const JourneyHistory = dynamic(() => import("@/lib/journey-history"), {
+  ssr: false,
+  loading: () => <Typography variant="body2" color="text.secondary">Loading journey history...</Typography>,
+});
+
+const isExpiredToken = (token: string) => {
+  try {
+    const payload = JSON.parse(window.atob(token.split(".")[1])) as { exp?: number };
+    return typeof payload.exp === "number" && payload.exp * 1000 <= Date.now();
+  } catch {
+    return true;
+  }
+};
+
 export default function HomePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [user, setUser] = useState<AppUser | null>(null);
   const [token, setToken] = useState("");
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -23,17 +38,14 @@ export default function HomePage() {
     }
 
     const saved = authStorage.get();
-    if (saved) {
+    if (saved && !isExpiredToken(saved.token)) {
       setUser(saved.user);
       setToken(saved.token);
+    } else if (saved) {
+      authStorage.clear();
     }
+    setAuthReady(true);
   }, []);
-
-  useEffect(() => {
-    if (!user) {
-      setToken("");
-    }
-  }, [user]);
 
   return (
     <Box className="relative min-h-screen overflow-hidden bg-slate-950">
@@ -85,9 +97,9 @@ export default function HomePage() {
                 />
               </Box>
 
-              {user?.role === "driver" ? (
+              {authReady && user?.role === "driver" ? (
                 <LocationTrackerClient user={user} token={token} />
-              ) : user?.role === "admin" ? (
+              ) : authReady && user?.role === "admin" ? (
                 <Typography variant="body2" sx={{ color: "#cbd5e1" }}>
                   Management access enabled. Rider GPS tracking is disabled for administrators.
                 </Typography>
@@ -99,7 +111,7 @@ export default function HomePage() {
             </Box>
           </Grid>
 
-          {user?.role === "admin" ? (
+          {authReady && user?.role === "admin" && token ? (
             <Grid size={{ xs: 12, lg: 7 }}>
               <Box
                 sx={{
@@ -118,7 +130,16 @@ export default function HomePage() {
                 </Typography>
 
                 <AdminLiveMap token={token} />
+                <Link href="#previous-journeys" underline="hover" sx={{ mt: 2, fontWeight: 700 }}>
+                  View previous journeys by rider
+                </Link>
               </Box>
+            </Grid>
+          ) : null}
+
+          {authReady && user?.role === "admin" && token ? (
+            <Grid size={12}>
+              <JourneyHistory token={token} />
             </Grid>
           ) : null}
         </Grid>
