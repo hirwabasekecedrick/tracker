@@ -66,6 +66,12 @@ const loadAccounts = async () => {
             phoneNumber: account.phoneNumber,
         });
     }
+    for (const userId of users.keys()) {
+        const account = getAccountById(userId);
+        if (!account || account.role !== "driver") {
+            users.delete(userId);
+        }
+    }
 };
 const users = new Map();
 const getUserState = (userId, account) => {
@@ -162,7 +168,7 @@ const finishPersistedJourney = async (record) => {
     });
 };
 const emitUsersUpdate = () => {
-    io.to("admins").emit("usersUpdate", Array.from(users.values()));
+    io.to("admins").emit("usersUpdate", Array.from(users.values()).filter((user) => user.role === "driver" && getAccountById(user.userId)));
 };
 const getBearerToken = (req) => {
     const header = req.headers.authorization;
@@ -246,7 +252,14 @@ app.get("/api/journey/users", (req, res) => {
         res.status(403).json({ message: "Admin access required" });
         return;
     }
-    res.json(Array.from(users.values()));
+    void loadAccounts()
+        .then(() => {
+        res.json(Array.from(users.values()).filter((journeyUser) => journeyUser.role === "driver" && getAccountById(journeyUser.userId)));
+    })
+        .catch((error) => {
+        console.error("Unable to refresh fleet accounts", error);
+        res.status(500).json({ message: "Unable to load fleet" });
+    });
 });
 app.get("/api/journey/history", async (req, res) => {
     const user = getAuthenticatedUser(req);
