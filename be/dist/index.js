@@ -294,9 +294,10 @@ io.on("connection", (socket) => {
             socket.emit("usersUpdate", [getUserState(user.userId, account)]);
         }
     }
-    socket.on("journey:start", async (payload) => {
+    socket.on("journey:start", async (payload, acknowledge) => {
         if (user?.role !== "driver") {
             socket.emit("error", { message: "Only riders can start journeys" });
+            acknowledge?.({ ok: false });
             return;
         }
         if (!payload || typeof payload !== "object") {
@@ -320,15 +321,18 @@ io.on("connection", (socket) => {
         try {
             await createPersistedJourney(record);
             emitUsersUpdate();
+            acknowledge?.({ ok: true });
         }
         catch (error) {
             console.error("Unable to persist journey start", error);
             socket.emit("error", { message: "Unable to start journey" });
+            acknowledge?.({ ok: false });
         }
     });
-    socket.on("journey:stop", async () => {
+    socket.on("journey:stop", async (_payload, acknowledge) => {
         if (user?.role !== "driver") {
             socket.emit("error", { message: "Only riders can stop journeys" });
+            acknowledge?.({ ok: false });
             return;
         }
         const account = [...accounts.values()].find((entry) => entry.id === user?.userId);
@@ -343,24 +347,30 @@ io.on("connection", (socket) => {
         try {
             await finishPersistedJourney(record);
             emitUsersUpdate();
+            acknowledge?.({ ok: true });
         }
         catch (error) {
             console.error("Unable to persist journey stop", error);
             socket.emit("error", { message: "Unable to stop journey" });
+            acknowledge?.({ ok: false });
         }
     });
-    socket.on("locationUpdate", async (payload) => {
+    socket.on("locationUpdate", async (payload, acknowledge) => {
+        const acknowledgeFailure = () => acknowledge?.({ ok: false });
         if (!user || user.role !== "driver") {
             socket.emit("error", { message: "Authentication required" });
+            acknowledgeFailure();
             return;
         }
         if (!isValidLocationUpdate(payload)) {
             socket.emit("error", { message: "Invalid location payload" });
+            acknowledgeFailure();
             return;
         }
         const account = [...accounts.values()].find((entry) => entry.id === user.userId);
         if (!account) {
             socket.emit("error", { message: "User not found" });
+            acknowledgeFailure();
             return;
         }
         const { name, vehicleNumber, phoneNumber, latitude, longitude, timestamp } = payload;
@@ -378,9 +388,12 @@ io.on("connection", (socket) => {
             }
             catch (error) {
                 console.error("Unable to persist location point", error);
+                acknowledgeFailure();
+                return;
             }
         }
         emitUsersUpdate();
+        acknowledge?.({ ok: true });
     });
     socket.on("disconnect", () => {
         console.log("Client disconnected", socket.id);

@@ -15,6 +15,70 @@ type LocationUpdate = {
   timestamp: number;
 };
 
+type JourneyStartEvent = {
+  type: "journey:start";
+  eventId: string;
+  payload: {
+    userId: string;
+    name: string;
+    vehicleNumber: string;
+    phoneNumber: string;
+  };
+};
+
+type JourneyStopEvent = {
+  type: "journey:stop";
+  eventId: string;
+  payload: { userId: string };
+};
+
+type LocationEvent = LocationUpdate & {
+  type: "locationUpdate";
+  eventId: string;
+};
+
+type OfflineEvent = JourneyStartEvent | JourneyStopEvent | LocationEvent;
+
+const getQueueKey = (userId: string) => `tracker-event-queue-${userId}`;
+
+const readEventQueue = (userId: string): OfflineEvent[] => {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const stored = window.localStorage.getItem(getQueueKey(userId));
+    if (!stored) {
+      return [];
+    }
+
+    const parsed = JSON.parse(stored) as unknown;
+    return Array.isArray(parsed) ? (parsed as OfflineEvent[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeEventQueue = (userId: string, queue: OfflineEvent[]) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(getQueueKey(userId), JSON.stringify(queue));
+  } catch (error) {
+    console.error("Unable to save offline location queue", error);
+  }
+};
+
+const createQueueId = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
 const getSocketUrl = () => {
   if (typeof window === "undefined") {
     return "http://localhost:4000";
@@ -28,6 +92,8 @@ const getSocketUrl = () => {
 
 export default function LocationTrackerClient({ user, token }: { user: AppUser; token: string }) {
   const socketRef = useRef<Socket | null>(null);
+  const flushingQueueRef = useRef(false);
+  const flushEventQueueRef = useRef<(() => void) | null>(null);
   const userIdRef = useRef<string>(user.id);
   const [status, setStatus] = useState("Waiting for location");
   const [location, setLocation] = useState<LocationUpdate | null>(null);
@@ -64,9 +130,54 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
 
     socketRef.current = socket;
 
+    const flushEventQueue = () => {
+      if (flushingQueueRef.current || !socket.connected) {
+        return;
+      }
+
+      const queue = readEventQueue(userIdRef.current);
+      if (!queue.length) {
+        return;
+      }
+
+      flushingQueueRef.current = true;
+      const sendNext = () => {
+        const pending = readEventQueue(userIdRef.current);
+        const next = pending[0];
+
+        if (!next || !socket.connected) {
+          flushingQueueRef.current = false;
+          return;
+        }
+
+        const acknowledge = (acknowledgement?: { ok?: boolean }) => {
+          if (!acknowledgement?.ok) {
+            flushingQueueRef.current = false;
+            return;
+          }
+
+          writeEventQueue(userIdRef.current, pending.slice(1));
+          sendNext();
+        };
+
+        if (next.type === "journey:start") {
+          socket.emit("journey:start", next.payload, acknowledge);
+        } else if (next.type === "journey:stop") {
+          socket.emit("journey:stop", next.payload, acknowledge);
+        } else {
+          socket.emit("locationUpdate", next, acknowledge);
+        }
+      };
+
+      sendNext();
+    };
+
+    flushEventQueueRef.current = flushEventQueue;
+
     const handleConnect = () => {
       setConnected(true);
       setStatus(journeyActive ? "On delivery" : "Available for deliveries");
+      flushEventQueue();
     };
 
     const handleDisconnect = () => {
@@ -92,8 +203,20 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         setLocation(payload);
 
         if (journeyActive) {
-          setStatus("Sending live coordinates");
-          socket.emit("locationUpdate", payload);
+          const queuedPayload: LocationEvent = {
+            ...payload,
+            type: "locationUpdate",
+            eventId: createQueueId(),
+          };
+          const queue = [...readEventQueue(userIdRef.current), queuedPayload];
+          writeEventQueue(userIdRef.current, queue);
+
+          if (socket.connected) {
+            setStatus("Sending live coordinates");
+            flushEventQueue();
+          } else {
+            setStatus(`${queue.length} location update(s) waiting to sync`);
+          }
         }
       },
       (error) => {
@@ -118,32 +241,49 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.disconnect();
+      flushEventQueueRef.current = null;
     };
   }, [journeyActive, name, phoneNumber, token, vehicleNumber]);
 
   const startJourney = () => {
-    if (!socketRef.current || !token) {
+    if (!token) {
       return;
     }
 
-    socketRef.current.emit("journey:start", {
-      userId: userIdRef.current,
-      name,
-      vehicleNumber,
-      phoneNumber,
-    });
+    const event: JourneyStartEvent = {
+      type: "journey:start",
+      eventId: createQueueId(),
+      payload: {
+        userId: userIdRef.current,
+        name,
+        vehicleNumber,
+        phoneNumber,
+      },
+    };
+    const queue = [...readEventQueue(userIdRef.current), event];
+    writeEventQueue(userIdRef.current, queue);
     setJourneyActive(true);
-    setStatus("On delivery");
+    setStatus(socketRef.current?.connected ? "Starting delivery" : "Start queued for reconnection");
+
+    flushEventQueueRef.current?.();
   };
 
   const stopJourney = () => {
-    if (!socketRef.current || !token) {
+    if (!token) {
       return;
     }
 
-    socketRef.current.emit("journey:stop", { userId: userIdRef.current });
+    const event: JourneyStopEvent = {
+      type: "journey:stop",
+      eventId: createQueueId(),
+      payload: { userId: userIdRef.current },
+    };
+    const queue = [...readEventQueue(userIdRef.current), event];
+    writeEventQueue(userIdRef.current, queue);
     setJourneyActive(false);
-    setStatus("Available for deliveries");
+    setStatus(socketRef.current?.connected ? "Ending delivery" : "Stop queued for reconnection");
+
+    flushEventQueueRef.current?.();
   };
 
   return (
