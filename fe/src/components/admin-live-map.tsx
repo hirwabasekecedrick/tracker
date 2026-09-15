@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
-import { Box, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
+import { Box, Card, CardContent, Chip, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import { io, type Socket } from "socket.io-client";
 import type { UserJourneyState } from "@/lib/types";
 
@@ -70,7 +70,19 @@ function FitToUsers({ users }: { users: UserJourneyState[] }) {
   return null;
 }
 
-export default function AdminLiveMap({ token }: { token: string }) {
+type AdminLiveMapProps = {
+  token: string;
+  selectedDriverId: string;
+  onSelectedDriverChange: (driverId: string) => void;
+  onDriversChange: (drivers: UserJourneyState[]) => void;
+};
+
+export default function AdminLiveMap({
+  token,
+  selectedDriverId,
+  onSelectedDriverChange,
+  onDriversChange,
+}: AdminLiveMapProps) {
   const [users, setUsers] = useState<UserJourneyState[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
   const [apiConnected, setApiConnected] = useState(false);
@@ -102,7 +114,9 @@ export default function AdminLiveMap({ token }: { token: string }) {
     });
 
     socket.on("usersUpdate", (payload: UserJourneyState[]) => {
-      setUsers(Array.isArray(payload) ? payload : []);
+      const nextUsers = Array.isArray(payload) ? payload : [];
+      setUsers(nextUsers);
+      onDriversChange(nextUsers);
     });
 
     const refreshUsers = () => {
@@ -116,7 +130,9 @@ export default function AdminLiveMap({ token }: { token: string }) {
           return res.json();
         })
         .then((data) => {
-          setUsers(Array.isArray(data) ? data : []);
+          const nextUsers = Array.isArray(data) ? data : [];
+          setUsers(nextUsers);
+          onDriversChange(nextUsers);
           setApiConnected(true);
         })
         .catch((error) => {
@@ -136,16 +152,32 @@ export default function AdminLiveMap({ token }: { token: string }) {
       socket.disconnect();
       window.clearInterval(refreshTimer);
     };
-  }, [token]);
+  }, [onDriversChange, token]);
 
   const visibleUsers = useMemo(
-    () => users.filter((user) => user.active),
-    [users]
+    () => users.filter((user) => user.active && (!selectedDriverId || user.userId === selectedDriverId)),
+    [selectedDriverId, users]
   );
 
   return (
     <Box sx={{ display: "grid", gap: 2 }}>
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+        <FormControl size="small" sx={{ minWidth: 220 }}>
+          <InputLabel id="active-driver-label">Driver on map</InputLabel>
+          <Select
+            labelId="active-driver-label"
+            value={selectedDriverId}
+            label="Driver on map"
+            onChange={(event) => onSelectedDriverChange(event.target.value)}
+          >
+            <MenuItem value="">All active drivers</MenuItem>
+            {users.filter((user) => user.active).map((user) => (
+              <MenuItem key={user.userId} value={user.userId}>
+                {user.name} · {user.vehicleNumber || "Unassigned"}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <Chip
           label={socketConnected ? "Realtime socket" : apiConnected ? "Live polling fallback" : "Connecting..."}
           color={socketConnected || apiConnected ? "success" : "warning"}

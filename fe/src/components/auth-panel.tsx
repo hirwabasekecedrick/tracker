@@ -49,26 +49,7 @@ export default function AuthPanel({ onLogin, onLogout, user }: AuthPanelProps) {
   };
 
   if (user) {
-    return (
-      <Card sx={{ borderRadius: 3, background: "rgba(15, 23, 42, 0.8)" }}>
-        <CardContent>
-          <Stack spacing={1.5}>
-            <Typography variant="h6" sx={{ color: "#f8fafc", fontWeight: 700 }}>
-              Logged in as {user.name}
-            </Typography>
-            <Typography variant="body2" sx={{ color: "#cbd5e1" }}>
-              {user.email}
-            </Typography>
-            <Typography variant="body2" sx={{ color: "#cbd5e1" }}>
-              Role: {user.role}
-            </Typography>
-            <Button variant="outlined" color="error" onClick={onLogout}>
-              Logout
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-    );
+    return null;
   }
 
   return (

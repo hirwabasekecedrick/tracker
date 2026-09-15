@@ -25,7 +25,7 @@ const getApiBase = () => {
   return process.env.NEXT_PUBLIC_API_URL;
 };
 
-export default function JourneyHistory({ token }: { token: string }) {
+export default function JourneyHistory({ token, selectedDriverId }: { token: string; selectedDriverId: string }) {
   const [journeys, setJourneys] = useState<HistoricalJourney[]>([]);
   const [error, setError] = useState("");
 
@@ -44,7 +44,7 @@ export default function JourneyHistory({ token }: { token: string }) {
   }, [token]);
 
   const groupedJourneys = useMemo(() => {
-    return journeys.reduce<Record<string, HistoricalJourney[]>>((groups, journey) => {
+    return journeys.filter((journey) => !selectedDriverId || journey.userId === selectedDriverId).reduce<Record<string, HistoricalJourney[]>>((groups, journey) => {
       const key = journey.userId;
       groups[key] = groups[key] || [];
       groups[key].push(journey);
