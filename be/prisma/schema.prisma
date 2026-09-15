@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Journey {
+  id            String          @id @default(cuid())
+  userId        String
+  name          String
+  vehicleNumber String
+  startedAt     DateTime        @default(now())
+  endedAt       DateTime?
+  active        Boolean         @default(true)
+  points        LocationPoint[]
+
+  @@index([userId, startedAt])
+}
+
+model LocationPoint {
+  id        Int      @id @default(autoincrement())
+  journeyId String
+  journey   Journey  @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  latitude  Float
+  longitude Float
+  timestamp DateTime
+
+  @@index([journeyId, timestamp])
+}
