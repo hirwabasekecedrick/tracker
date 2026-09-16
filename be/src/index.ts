@@ -228,11 +228,15 @@ const finishPersistedJourney = async (record: UserJourneyState) => {
   });
 };
 
-const emitUsersUpdate = () => {
-  io.to("admins").emit(
-    "usersUpdate",
-    Array.from(users.values()).filter((user) => user.role === "driver" && getAccountById(user.userId))
+const MIN_JOURNEY_POINTS = 2;
+
+const activeDriverStates = () =>
+  Array.from(users.values()).filter(
+    (user) => user.active && user.role === "driver" && getAccountById(user.userId)
   );
+
+const emitUsersUpdate = () => {
+  io.to("admins").emit("usersUpdate", activeDriverStates());
 };
 
 const getBearerToken = (req: Request) => {
@@ -342,11 +346,7 @@ app.get("/api/journey/users", (req: Request, res: Response) => {
 
   void loadAccounts()
     .then(() => {
-      res.json(
-        Array.from(users.values()).filter((journeyUser) =>
-          journeyUser.role === "driver" && getAccountById(journeyUser.userId)
-        )
-      );
+      res.json(activeDriverStates());
     })
     .catch((error) => {
       console.error("Unable to refresh fleet accounts", error);
@@ -395,6 +395,48 @@ app.get("/api/journey/history", async (req: Request, res: Response) => {
   }
 });
 
+app.get("/api/journey/mine", async (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+
+  if (!user || user.role !== "driver") {
+    res.status(403).json({ message: "Driver access required" });
+    return;
+  }
+
+  try {
+    const journeys = await prisma.journey.findMany({
+      where: { userId: user.userId },
+      orderBy: { startedAt: "desc" },
+      include: { points: { orderBy: { timestamp: "asc" } } },
+    });
+
+    res.json(
+      journeys.map((journey) => {
+        const account = getAccountById(journey.userId);
+
+        return {
+          id: journey.id,
+          userId: journey.userId,
+          driverName: journey.name,
+          email: account?.email || "",
+          vehicleNumber: journey.vehicleNumber,
+          startedAt: journey.startedAt.getTime(),
+          endedAt: journey.endedAt?.getTime() || null,
+          active: journey.active,
+          points: journey.points.map((point) => ({
+            latitude: point.latitude,
+            longitude: point.longitude,
+            timestamp: point.timestamp.getTime(),
+          })),
+        };
+      })
+    );
+  } catch (error) {
+    console.error("Unable to load my journey history", error);
+    res.status(500).json({ message: "Unable to load journey history" });
+  }
+});
+
 app.post("/api/journey/start", (req: Request, res: Response) => {
   const authenticatedUser = getAuthenticatedUser(req);
   const { userId, name, vehicleNumber, phoneNumber } = req.body as {
@@ -429,6 +471,8 @@ app.post("/api/journey/start", (req: Request, res: Response) => {
   record.active = true;
   record.startedAt = Date.now();
   record.updatedAt = Date.now();
+  record.path = [];
+  record.lastLocation = null;
 
   void createPersistedJourney(record).then(emitUsersUpdate).catch(console.error);
   res.json({ ok: true, user: record });
@@ -456,6 +500,19 @@ app.post("/api/journey/stop", (req: Request, res: Response) => {
   }
 
   const record = getUserState(userId, account);
+
+  if (!record.active) {
+    res.status(409).json({ message: "No active journey to stop" });
+    return;
+  }
+
+  if (record.path.length < MIN_JOURNEY_POINTS) {
+    res.status(400).json({
+      message: `A journey must record at least ${MIN_JOURNEY_POINTS} GPS points before it can be ended. Current points: ${record.path.length}.`,
+    });
+    return;
+  }
+
   record.active = false;
   record.deliveryStatus = "available";
   record.updatedAt = Date.now();
@@ -489,7 +546,7 @@ io.on("connection", (socket) => {
 
   if (user?.role === "admin") {
     socket.join("admins");
-    socket.emit("usersUpdate", Array.from(users.values()));
+    socket.emit("usersUpdate", activeDriverStates());
   } else if (user) {
     const account = accounts.get(user.email);
     if (account) {
@@ -532,6 +589,8 @@ io.on("connection", (socket) => {
     record.active = true;
     record.startedAt = Date.now();
     record.updatedAt = Date.now();
+    record.path = [];
+    record.lastLocation = null;
 
     try {
       await createPersistedJourney(record);
@@ -560,6 +619,21 @@ io.on("connection", (socket) => {
     }
 
     const record = getUserState(account.id, account);
+
+    if (!record.active) {
+      socket.emit("error", { message: "No active journey to stop" });
+      acknowledge?.({ ok: false });
+      return;
+    }
+
+    if (record.path.length < MIN_JOURNEY_POINTS) {
+      socket.emit("error", {
+        message: `A journey must record at least ${MIN_JOURNEY_POINTS} GPS points before it can be ended. Current points: ${record.path.length}.`,
+      });
+      acknowledge?.({ ok: false });
+      return;
+    }
+
     record.active = false;
     record.deliveryStatus = "available";
     record.updatedAt = Date.now();

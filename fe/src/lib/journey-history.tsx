@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MapContainer, Polyline, TileLayer } from "react-leaflet";
-import { Box, Card, CardContent, Chip, Link, Stack, Typography } from "@mui/material";
+import { Box, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
 import type { LocationPoint } from "@/lib/types";
 
 type HistoricalJourney = {
@@ -25,12 +25,12 @@ const getApiBase = () => {
   return process.env.NEXT_PUBLIC_API_URL;
 };
 
-export default function JourneyHistory({ token, selectedDriverId }: { token: string; selectedDriverId: string }) {
+export default function JourneyHistory({ token, selectedDriverId, own = false }: { token: string; selectedDriverId: string; own?: boolean }) {
   const [journeys, setJourneys] = useState<HistoricalJourney[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`${getApiBase()}/api/journey/history`, {
+    fetch(`${getApiBase()}/api/${own ? "journey/mine" : "journey/history"}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((response) => {
@@ -41,26 +41,28 @@ export default function JourneyHistory({ token, selectedDriverId }: { token: str
       })
       .then((data) => setJourneys(Array.isArray(data) ? data : []))
       .catch((requestError: Error) => setError(requestError.message));
-  }, [token]);
+  }, [own, token]);
 
   const groupedJourneys = useMemo(() => {
-    return journeys.filter((journey) => !selectedDriverId || journey.userId === selectedDriverId).reduce<Record<string, HistoricalJourney[]>>((groups, journey) => {
-      const key = journey.userId;
-      groups[key] = groups[key] || [];
-      groups[key].push(journey);
-      return groups;
-    }, {});
-  }, [journeys]);
+    return own
+      ? { mine: journeys }
+      : journeys.filter((journey) => !selectedDriverId || journey.userId === selectedDriverId).reduce<Record<string, HistoricalJourney[]>>((groups, journey) => {
+          const key = journey.userId;
+          groups[key] = groups[key] || [];
+          groups[key].push(journey);
+          return groups;
+        }, {});
+  }, [journeys, own, selectedDriverId]);
 
   return (
     <Box id="previous-journeys" sx={{ display: "grid", gap: 2, scrollMarginTop: 24 }}>
       <Stack direction="row" spacing={2} sx={{ justifyContent: "space-between", alignItems: "center" }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>
-            Previous journeys
+            {own ? "My journeys" : "Previous journeys"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Historical routes grouped by rider.
+            {own ? "Every route you have recorded, with its GPS trail." : "Historical routes grouped by rider."}
           </Typography>
         </Box>
         <Chip label={`${journeys.length} journey(s)`} color="primary" />
@@ -68,7 +70,7 @@ export default function JourneyHistory({ token, selectedDriverId }: { token: str
 
       {error ? <Typography color="error">{error}</Typography> : null}
       {!error && !journeys.length ? (
-        <Typography color="text.secondary">No previous journeys found.</Typography>
+        <Typography color="text.secondary">No journeys found yet. Start a journey to record your first route.</Typography>
       ) : null}
 
       {Object.entries(groupedJourneys).map(([userId, driverJourneys]) => {
@@ -77,14 +79,16 @@ export default function JourneyHistory({ token, selectedDriverId }: { token: str
         return (
           <Card key={userId} variant="outlined">
             <CardContent sx={{ display: "grid", gap: 1.5 }}>
-              <Box>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                  {driver.driverName}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {driver.email || "No email"} · {driver.vehicleNumber || "Unassigned vehicle"}
-                </Typography>
-              </Box>
+              {own ? null : (
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                    {driver.driverName}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {driver.email || "No email"} · {driver.vehicleNumber || "Unassigned vehicle"}
+                  </Typography>
+                </Box>
+              )}
 
               {driverJourneys.map((journey) => (
                 <Box key={journey.id} sx={{ display: "grid", gap: 1 }}>

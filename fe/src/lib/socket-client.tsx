@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { Box, Button, Chip, Stack, TextField, Typography } from "@mui/material";
+import { Box, Button, Card, CardContent, Chip, Divider, Stack, Typography } from "@mui/material";
 import type { AppUser } from "@/lib/auth";
+import { useDriverProfile } from "@/lib/driver-profile";
 import dynamic from "next/dynamic";
-import type { LocationPoint } from "@/lib/types";
+import type { LocationPoint, UserJourneyState } from "@/lib/types";
 
 const DriverLiveMap = dynamic(() => import("@/components/driver-live-map"), {
   ssr: false,
@@ -45,6 +46,52 @@ type LocationEvent = LocationUpdate & {
 };
 
 type OfflineEvent = JourneyStartEvent | JourneyStopEvent | LocationEvent;
+
+const MIN_ROUTE_POINTS = 2;
+
+type JourneySummary = {
+  startedAt: number;
+  endedAt: number;
+  points: number;
+  distanceKm: number;
+};
+
+const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+
+const haversineKm = (a: LocationPoint, b: LocationPoint) => {
+  const R = 6371;
+  const dLat = toRadians(b.latitude - a.latitude);
+  const dLng = toRadians(b.longitude - a.longitude);
+  const lat1 = toRadians(a.latitude);
+  const lat2 = toRadians(b.latitude);
+
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
+const computeJourneySummary = (points: LocationPoint[]): JourneySummary | null => {
+  const first = points[0];
+  const last = points.at(-1);
+
+  if (!first || !last) {
+    return null;
+  }
+
+  let distanceKm = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    distanceKm += haversineKm(points[i - 1], points[i]);
+  }
+
+  return {
+    startedAt: first.timestamp,
+    endedAt: last.timestamp,
+    points: points.length,
+    distanceKm,
+  };
+};
 
 const getQueueKey = (userId: string) => `tracker-event-queue-${userId}`;
 
@@ -106,34 +153,30 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
   const [routePath, setRoutePath] = useState<LocationPoint[]>([]);
   const [connected, setConnected] = useState(false);
   const [journeyActive, setJourneyActive] = useState(false);
-  const [name, setName] = useState(user.name || process.env.NEXT_PUBLIC_DEFAULT_RIDER_NAME || "");
-  const [vehicleNumber, setVehicleNumber] = useState(user.vehicleNumber || process.env.NEXT_PUBLIC_DEFAULT_VEHICLE_NUMBER || "");
-  const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || process.env.NEXT_PUBLIC_DEFAULT_RIDER_PHONE || "");
+  const [journeySummary, setJourneySummary] = useState<JourneySummary | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const { profile } = useDriverProfile(user);
   const journeyActiveRef = useRef(false);
-  const riderDetailsRef = useRef({ name, vehicleNumber, phoneNumber });
-
-  useEffect(() => {
-    setName(user.name || process.env.NEXT_PUBLIC_DEFAULT_RIDER_NAME || "");
-    setVehicleNumber(user.vehicleNumber || process.env.NEXT_PUBLIC_DEFAULT_VEHICLE_NUMBER || "");
-    setPhoneNumber(user.phoneNumber || process.env.NEXT_PUBLIC_DEFAULT_RIDER_PHONE || "");
-  }, [user]);
+  const riderDetailsRef = useRef({ name: profile.name, vehicleNumber: profile.vehicleNumber, phoneNumber: profile.phoneNumber });
 
   useEffect(() => {
     journeyActiveRef.current = journeyActive;
   }, [journeyActive]);
 
   useEffect(() => {
-    riderDetailsRef.current = { name, vehicleNumber, phoneNumber };
-  }, [name, phoneNumber, vehicleNumber]);
+    riderDetailsRef.current = { name: profile.name, vehicleNumber: profile.vehicleNumber, phoneNumber: profile.phoneNumber };
+  }, [profile]);
+
+  const refreshPendingCount = () => {
+    setPendingCount(readEventQueue(userIdRef.current).length);
+  };
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setStatus("Geolocation is not supported on this device");
       return;
     }
 
     if (!token) {
-      setStatus("Please log in to start tracking");
       return;
     }
 
@@ -169,13 +212,20 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
           return;
         }
 
+        const timeoutId = window.setTimeout(() => {
+          flushingQueueRef.current = false;
+        }, 8000);
+
         const acknowledge = (acknowledgement?: { ok?: boolean }) => {
+          window.clearTimeout(timeoutId);
+
           if (!acknowledgement?.ok) {
             flushingQueueRef.current = false;
             return;
           }
 
           writeEventQueue(userIdRef.current, pending.slice(1));
+          refreshPendingCount();
           sendNext();
         };
 
@@ -193,26 +243,77 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
 
     flushEventQueueRef.current = flushEventQueue;
 
+    const handleUsersUpdate = (states: unknown) => {
+      if (!Array.isArray(states)) {
+        return;
+      }
+
+      const mine = states.find(
+        (state): state is UserJourneyState =>
+          typeof state === "object" && state !== null && (state as UserJourneyState).userId === userIdRef.current
+      );
+
+      if (!mine) {
+        return;
+      }
+
+      journeyActiveRef.current = mine.active;
+      setJourneyActive(mine.active);
+      setStatus(mine.active ? "On delivery" : "Available for deliveries");
+
+      setRoutePath((current) => {
+        const serverPath = Array.isArray(mine.path) ? mine.path : [];
+
+        if (current.length >= serverPath.length) {
+          return current;
+        }
+
+        if (serverPath.length) {
+          return serverPath;
+        }
+
+        if (mine.lastLocation) {
+          return [{ latitude: mine.lastLocation.latitude, longitude: mine.lastLocation.longitude, timestamp: mine.lastLocation.timestamp }];
+        }
+
+        return current;
+      });
+
+      if (mine.lastLocation) {
+        setLocation({
+          userId: userIdRef.current,
+          ...riderDetailsRef.current,
+          latitude: mine.lastLocation.latitude,
+          longitude: mine.lastLocation.longitude,
+          timestamp: mine.lastLocation.timestamp,
+        });
+      }
+    };
+
     const handleConnect = () => {
       setConnected(true);
       setStatus(journeyActiveRef.current ? "On delivery" : "Available for deliveries");
+      refreshPendingCount();
       flushEventQueue();
     };
 
     const handleDisconnect = () => {
       setConnected(false);
-      setStatus("Disconnected from tracker");
+      flushingQueueRef.current = false;
+      setStatus("Disconnected from tracker — points keep recording locally");
+      refreshPendingCount();
     };
 
     const handleConnectError = (error: Error) => {
       setConnected(false);
-      setStatus(`Connection error: ${error.message}`);
+      setStatus(`Connection error: ${error.message} — points keep recording locally`);
       console.error("Tracker socket connection error", error);
     };
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleConnectError);
+    socket.on("usersUpdate", handleUsersUpdate);
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -244,8 +345,9 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
             setStatus("Sending live coordinates");
             flushEventQueue();
           } else {
-            setStatus(`${queue.length} location update(s) waiting to sync`);
+            setStatus(`${queue.length} point(s) waiting to sync`);
           }
+          refreshPendingCount();
         }
       },
       (error) => {
@@ -281,12 +383,27 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleConnectError);
+      socket.off("usersUpdate", handleUsersUpdate);
       socket.disconnect();
       flushEventQueueRef.current = null;
     };
   }, [token, user.id]);
 
-  const startJourney = () => {
+  const getAccuratePosition = () =>
+  new Promise<GeolocationPosition | null>((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve(position),
+      () => resolve(null),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+  });
+
+  const startJourney = async () => {
     if (!token) {
       return;
     }
@@ -299,15 +416,38 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         ...riderDetailsRef.current,
       },
     };
+
+    const accurate = await getAccuratePosition();
+    const seed: LocationPoint | null = accurate
+      ? {
+          latitude: accurate.coords.latitude,
+          longitude: accurate.coords.longitude,
+          timestamp: Date.now(),
+        }
+      : location
+        ? { latitude: location.latitude, longitude: location.longitude, timestamp: location.timestamp }
+        : null;
+
     const queue = [...readEventQueue(userIdRef.current), event];
+
+    if (seed) {
+      const startingPayload: LocationUpdate = {
+        userId: userIdRef.current,
+        ...riderDetailsRef.current,
+        latitude: seed.latitude,
+        longitude: seed.longitude,
+        timestamp: seed.timestamp,
+      };
+      setLocation(startingPayload);
+      queue.push({ ...startingPayload, type: "locationUpdate", eventId: createQueueId() });
+    }
+
     writeEventQueue(userIdRef.current, queue);
+    refreshPendingCount();
     setJourneyActive(true);
+    setJourneySummary(null);
     journeyActiveRef.current = true;
-    setRoutePath(
-      location
-        ? [{ latitude: location.latitude, longitude: location.longitude, timestamp: location.timestamp }]
-        : []
-    );
+    setRoutePath(seed ? [seed] : []);
     setStatus(socketRef.current?.connected ? "Starting delivery" : "Start queued for reconnection");
 
     flushEventQueueRef.current?.();
@@ -318,6 +458,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
       return;
     }
 
+    setJourneySummary(computeJourneySummary(routePath));
     const event: JourneyStopEvent = {
       type: "journey:stop",
       eventId: createQueueId(),
@@ -325,6 +466,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
     };
     const queue = [...readEventQueue(userIdRef.current), event];
     writeEventQueue(userIdRef.current, queue);
+    refreshPendingCount();
     setJourneyActive(false);
     journeyActiveRef.current = false;
     setStatus(socketRef.current?.connected ? "Ending delivery" : "Stop queued for reconnection");
@@ -342,40 +484,33 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         />
         <Chip label={journeyActive ? "On delivery" : "Available"} color={journeyActive ? "success" : "default"} />
         <Chip label={status} color="primary" variant="outlined" />
-      </Stack>
-
-      <Stack direction="row" spacing={2} sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <TextField
-          label="Driver name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          size="small"
-          sx={{ input: { color: "#f8fafc" }, label: { color: "#cbd5e1" } }}
-        />
-        <TextField
-          label="Vehicle number"
-          value={vehicleNumber}
-          onChange={(event) => setVehicleNumber(event.target.value)}
-          size="small"
-          sx={{ input: { color: "#f8fafc" }, label: { color: "#cbd5e1" } }}
-        />
-        <TextField
-          label="Phone number"
-          value={phoneNumber}
-          onChange={(event) => setPhoneNumber(event.target.value)}
-          size="small"
-          sx={{ input: { color: "#f8fafc" }, label: { color: "#cbd5e1" } }}
-        />
+        {journeyActive ? <Chip label={`Vehicle ${profile.vehicleNumber || "unassigned"}`} variant="outlined" /> : null}
+        {pendingCount > 0 ? (
+          <Chip label={`${pendingCount} queued for sync`} color="warning" variant="filled" />
+        ) : null}
       </Stack>
 
       <Stack direction="row" spacing={2}>
-        <Button variant="contained" color="success" onClick={startJourney} disabled={journeyActive || !connected || !token}>
+        <Button variant="contained" color="success" onClick={startJourney} disabled={journeyActive || !token || !location}>
           Start journey
         </Button>
-        <Button variant="outlined" color="error" onClick={stopJourney} disabled={!journeyActive}>
-          Stop journey
+        <Button variant="outlined" color="error" onClick={stopJourney} disabled={!journeyActive || routePath.length < MIN_ROUTE_POINTS}>
+          End journey
         </Button>
       </Stack>
+
+      {!connected && !journeyActive ? (
+        <Typography variant="body2" sx={{ color: "#f59e0b" }}>
+          You are offline. You can still start a journey — GPS points will be stored locally and synced automatically
+          once the connection is restored.
+        </Typography>
+      ) : null}
+
+      {journeyActive && routePath.length < MIN_ROUTE_POINTS ? (
+        <Typography variant="body2" sx={{ color: "#f59e0b" }}>
+          A journey needs at least {MIN_ROUTE_POINTS} GPS points before it can be ended. Current points: {routePath.length}. Keep moving so the route is recorded.
+        </Typography>
+      ) : null}
 
       <Box
         sx={{
@@ -405,7 +540,43 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         )}
       </Box>
 
-      {journeyActive ? <DriverLiveMap path={routePath} /> : null}
+      {journeyActive || journeySummary ? <DriverLiveMap path={routePath} /> : null}
+
+      {journeySummary ? (
+        <Card variant="outlined" sx={{ borderRadius: 3 }} id="journey-summary">
+          <CardContent sx={{ display: "grid", gap: 1.5 }}>
+            <Typography variant="overline" sx={{ color: "#94a3b8", letterSpacing: 1.4 }}>
+              Journey completed
+            </Typography>
+            <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", justifyContent: "space-between" }}>
+              <Box>
+                <Typography variant="caption" sx={{ color: "#94a3b8" }}>Distance travelled</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>
+                  {journeySummary.distanceKm.toFixed(2)} km
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" sx={{ color: "#94a3b8" }}>Duration</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>
+                  {Math.max(0, Math.round((journeySummary.endedAt - journeySummary.startedAt) / 60000))} min
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" sx={{ color: "#94a3b8" }}>GPS points recorded</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>
+                  {journeySummary.points}
+                </Typography>
+              </Box>
+            </Stack>
+            <Divider />
+            <Typography variant="body2" sx={{ color: "#94a3b8" }}>
+              Started {new Date(journeySummary.startedAt).toLocaleTimeString()} · Ended{" "}
+              {new Date(journeySummary.endedAt).toLocaleTimeString()}. The route and coordinates are saved and can be
+              reviewed by the admin.
+            </Typography>
+          </CardContent>
+        </Card>
+      ) : null}
     </Box>
   );
 }

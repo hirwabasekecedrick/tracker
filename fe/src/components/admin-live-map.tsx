@@ -15,14 +15,16 @@ const getApiBase = () => {
   throw new Error("NEXT_PUBLIC_API_URL is required");
 };
 
-const getMarkerIcon = (user: UserJourneyState) =>
+const ACTIVE_PATH_COLORS = ["#22c55e", "#34d399", "#a3e635", "#2dd4bf", "#4ade80", "#14b8a6"];
+
+const getMarkerIcon = (user: UserJourneyState, color: string) =>
   L.divIcon({
     html: `
       <div style="
         width: 38px;
         height: 38px;
         border-radius: 50%;
-        background: ${user.active ? "#22c55e" : "#f59e0b"};
+        background: ${color};
         color: white;
         display: flex;
         align-items: center;
@@ -187,7 +189,7 @@ export default function AdminLiveMap({
 
       <Card sx={{ overflow: "hidden", borderRadius: 3 }}>
         <CardContent sx={{ p: 0 }}>
-          <Box sx={{ height: 540, width: "100%" }}>
+          <Box sx={{ height: { xs: 340, sm: 440, md: 540 }, width: "100%" }}>
             <MapContainer center={[0, 0]} zoom={2} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -195,22 +197,23 @@ export default function AdminLiveMap({
               />
               <FitToUsers users={visibleUsers} />
 
-              {visibleUsers.map((user) => {
+              {visibleUsers.map((user, index) => {
                 if (!user.lastLocation) {
                   return null;
                 }
 
                 const latest = user.lastLocation;
                 const route = user.path.length ? user.path : [latest];
+                const color = ACTIVE_PATH_COLORS[index % ACTIVE_PATH_COLORS.length];
 
                 return (
                   <div key={user.userId}>
                     <Polyline
                       positions={route.map((point) => [point.latitude, point.longitude] as [number, number])}
-                      pathOptions={{ color: user.active ? "#22c55e" : "#f59e0b", weight: 5 }}
+                      pathOptions={{ color, weight: 5 }}
                     />
 
-                    <Marker position={[latest.latitude, latest.longitude]} icon={getMarkerIcon(user)}>
+                    <Marker position={[latest.latitude, latest.longitude]} icon={getMarkerIcon(user, color)}>
                       <Popup>
                         <Box sx={{ minWidth: 180 }}>
                           <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
@@ -249,14 +252,26 @@ export default function AdminLiveMap({
             No users are currently tracking.
           </Typography>
         ) : (
-          visibleUsers.map((user) => (
+          visibleUsers.map((user, index) => (
             <Card key={user.userId} variant="outlined">
               <CardContent>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2 }}>
                   <Box>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                      {user.name}
-                    </Typography>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <Box
+                        component="span"
+                        sx={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: "50%",
+                          backgroundColor: ACTIVE_PATH_COLORS[index % ACTIVE_PATH_COLORS.length],
+                          flexShrink: 0,
+                        }}
+                      />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                        {user.name}
+                      </Typography>
+                    </Box>
                     <Typography variant="caption" color="text.secondary">
                       {user.deliveryStatus === "on_delivery"
                         ? "On delivery"

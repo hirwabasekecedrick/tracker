@@ -2,6 +2,7 @@
 
 import HistoryIcon from "@mui/icons-material/History";
 import MapIcon from "@mui/icons-material/Map";
+import PersonIcon from "@mui/icons-material/Person";
 import { Box, Drawer, List, ListItemButton, ListItemIcon, ListItemText, Typography } from "@mui/material";
 import type { AppUser } from "@/lib/auth";
 
@@ -25,7 +26,18 @@ function NavigationItems({ user, onNavigate }: { user: AppUser; onNavigate?: () 
           <ListItemIcon><HistoryIcon /></ListItemIcon>
           <ListItemText primary="Previous journeys" />
         </ListItemButton>
-      ) : null}
+      ) : (
+        <>
+          <ListItemButton component="a" href="/driver/history" onClick={onNavigate}>
+            <ListItemIcon><HistoryIcon /></ListItemIcon>
+            <ListItemText primary="My journeys" />
+          </ListItemButton>
+          <ListItemButton component="a" href="/driver/profile" onClick={onNavigate}>
+            <ListItemIcon><PersonIcon /></ListItemIcon>
+            <ListItemText primary="Profile" />
+          </ListItemButton>
+        </>
+      )}
     </List>
   );
 }

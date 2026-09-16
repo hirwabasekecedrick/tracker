@@ -10,7 +10,7 @@ type AuthPanelProps = {
   user: AppUser | null;
 };
 
-export default function AuthPanel({ onLogin, onLogout, user }: AuthPanelProps) {
+export default function AuthPanel({ onLogin, user }: AuthPanelProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");

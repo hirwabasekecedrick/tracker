@@ -3,6 +3,7 @@
 import AccountCircleIcon from "@mui/icons-material/AccountCircle";
 import LogoutIcon from "@mui/icons-material/Logout";
 import MenuIcon from "@mui/icons-material/Menu";
+import PersonIcon from "@mui/icons-material/Person";
 import { AppBar, Avatar, Box, IconButton, ListItemIcon, Menu, MenuItem, Toolbar, Typography } from "@mui/material";
 import { useState } from "react";
 import type { AppUser } from "@/lib/auth";
@@ -56,6 +57,12 @@ export default function AppHeader({ user, isAdmin, onMenuClick, onLogout }: AppH
           </IconButton>
           <Menu anchorEl={accountMenuAnchor} open={Boolean(accountMenuAnchor)} onClose={closeAccountMenu}>
             <MenuItem disabled>{user.email}</MenuItem>
+            {!isAdmin ? (
+              <MenuItem component="a" href="/driver/profile" onClick={closeAccountMenu}>
+                <ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>
+                Profile
+              </MenuItem>
+            ) : null}
             <MenuItem onClick={() => { closeAccountMenu(); onLogout(); }}>
               <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
               Logout

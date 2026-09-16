@@ -1,20 +1,25 @@
 "use client";
 
-import { Box, Typography } from "@mui/material";
+import { Box } from "@mui/material";
 import { useRouter } from "next/navigation";
 import AdminWorkspace from "@/components/admin-workspace";
 import AuthenticatedShell from "@/components/authenticated-shell";
 import { useAuthSession } from "@/lib/auth-session";
+import { useAuthRedirect } from "@/lib/use-auth-guard";
 
 export default function AdminPage() {
   const router = useRouter();
-  const { user, token, ready, logout } = useAuthSession();
+  const { user, token, logout } = useAuthSession();
+  const authorized = user?.role === "admin" && Boolean(token);
+  useAuthRedirect("admin", authorized);
 
-  if (!ready) return <Box sx={{ minHeight: "100vh", background: "#08101f" }} />;
-  if (!user || user.role !== "admin" || !token) {
-    router.replace("/login");
-    return <Typography>Redirecting to login...</Typography>;
+  if (!authorized) {
+    return <Box sx={{ minHeight: "100vh", background: "#08101f" }} />;
   }
 
-  return <AuthenticatedShell user={user} onLogout={() => { logout(); router.replace("/login"); }}><AdminWorkspace token={token} /></AuthenticatedShell>;
+  return (
+    <AuthenticatedShell user={user!} onLogout={() => { logout(); router.replace("/login"); }}>
+      <AdminWorkspace token={token!} />
+    </AuthenticatedShell>
+  );
 }
