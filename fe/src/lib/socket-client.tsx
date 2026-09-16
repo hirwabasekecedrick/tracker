@@ -21,6 +21,7 @@ type LocationUpdate = {
   latitude: number;
   longitude: number;
   timestamp: number;
+  accuracy: number | null;
 };
 
 type JourneyStartEvent = {
@@ -48,6 +49,8 @@ type LocationEvent = LocationUpdate & {
 type OfflineEvent = JourneyStartEvent | JourneyStopEvent | LocationEvent;
 
 const MIN_ROUTE_POINTS = 2;
+
+const ACCURACY_THRESHOLD_M = 20;
 
 type JourneySummary = {
   startedAt: number;
@@ -155,6 +158,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
   const [journeyActive, setJourneyActive] = useState(false);
   const [journeySummary, setJourneySummary] = useState<JourneySummary | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
   const { profile } = useDriverProfile(user);
   const journeyActiveRef = useRef(false);
   const riderDetailsRef = useRef({ name: profile.name, vehicleNumber: profile.vehicleNumber, phoneNumber: profile.phoneNumber });
@@ -286,6 +290,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
           latitude: mine.lastLocation.latitude,
           longitude: mine.lastLocation.longitude,
           timestamp: mine.lastLocation.timestamp,
+          accuracy: null,
         });
       }
     };
@@ -317,12 +322,21 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
+        const accuracyMeters = typeof position.coords.accuracy === "number" ? Math.round(position.coords.accuracy) : null;
+        setAccuracy(accuracyMeters);
+
+        if (accuracyMeters !== null && accuracyMeters > ACCURACY_THRESHOLD_M) {
+          setStatus(`GPS precision ±${accuracyMeters} m — waiting for a better fix (need ≤ ${ACCURACY_THRESHOLD_M} m)`);
+          return;
+        }
+
         const payload: LocationUpdate = {
           userId: userIdRef.current,
           ...riderDetailsRef.current,
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           timestamp: Date.now(),
+          accuracy: accuracyMeters,
         };
 
         setLocation(payload);
@@ -373,9 +387,10 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 2000,
+        improvedAccuracyiOS: true,
+        maximumAge: 0,
         timeout: 15000,
-      }
+      } as PositionOptions & { improvedAccuracyiOS?: boolean }
     );
 
     return () => {
@@ -399,7 +414,12 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
     navigator.geolocation.getCurrentPosition(
       (position) => resolve(position),
       () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      {
+        enableHighAccuracy: true,
+        improvedAccuracyiOS: true,
+        maximumAge: 0,
+        timeout: 10000,
+      } as PositionOptions & { improvedAccuracyiOS?: boolean }
     );
   });
 
@@ -418,13 +438,17 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
     };
 
     const accurate = await getAccuratePosition();
-    const seed: LocationPoint | null = accurate
+    const accurateEnough =
+      accurate &&
+      (typeof accurate.coords.accuracy !== "number" || accurate.coords.accuracy <= ACCURACY_THRESHOLD_M);
+
+    const seed: LocationPoint | null = accurateEnough
       ? {
-          latitude: accurate.coords.latitude,
-          longitude: accurate.coords.longitude,
+          latitude: accurate!.coords.latitude,
+          longitude: accurate!.coords.longitude,
           timestamp: Date.now(),
         }
-      : location
+      : location && (location.accuracy === null || location.accuracy <= ACCURACY_THRESHOLD_M)
         ? { latitude: location.latitude, longitude: location.longitude, timestamp: location.timestamp }
         : null;
 
@@ -437,6 +461,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         latitude: seed.latitude,
         longitude: seed.longitude,
         timestamp: seed.timestamp,
+        accuracy: typeof accurate?.coords.accuracy === "number" ? Math.round(accurate.coords.accuracy) : null,
       };
       setLocation(startingPayload);
       queue.push({ ...startingPayload, type: "locationUpdate", eventId: createQueueId() });
@@ -484,6 +509,13 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
         />
         <Chip label={journeyActive ? "On delivery" : "Available"} color={journeyActive ? "success" : "default"} />
         <Chip label={status} color="primary" variant="outlined" />
+        {accuracy !== null ? (
+          <Chip
+            label={`GPS precision ±${accuracy} m`}
+            color={accuracy <= ACCURACY_THRESHOLD_M ? "success" : "warning"}
+            variant="filled"
+          />
+        ) : null}
         {journeyActive ? <Chip label={`Vehicle ${profile.vehicleNumber || "unassigned"}`} variant="outlined" /> : null}
         {pendingCount > 0 ? (
           <Chip label={`${pendingCount} queued for sync`} color="warning" variant="filled" />
@@ -531,6 +563,7 @@ export default function LocationTrackerClient({ user, token }: { user: AppUser; 
             </Typography>
             <Typography variant="body2" sx={{ color: "#cbd5e1" }}>
               Updated: {new Date(location.timestamp).toLocaleTimeString()}
+              {location.accuracy !== null ? ` · precision ±${location.accuracy} m` : ""}
             </Typography>
           </Stack>
         ) : (
