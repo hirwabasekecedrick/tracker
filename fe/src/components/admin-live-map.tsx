@@ -1,9 +1,27 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
+import {
+  MapContainer,
+  Marker,
+  Polyline,
+  Popup,
+  TileLayer,
+  useMap,
+} from "react-leaflet";
 import L from "leaflet";
-import { Box, Card, CardContent, Chip, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
+import {
+  Box,
+  Card,
+  CardContent,
+  Chip,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  Typography,
+} from "@mui/material";
 import { io, type Socket } from "socket.io-client";
 import type { UserJourneyState } from "@/lib/types";
 
@@ -15,7 +33,16 @@ const getApiBase = () => {
   throw new Error("NEXT_PUBLIC_API_URL is required");
 };
 
-const ACTIVE_PATH_COLORS = ["#22c55e", "#34d399", "#a3e635", "#2dd4bf", "#4ade80", "#14b8a6"];
+const ACTIVE_PATH_COLORS = [
+  "#22c55e",
+  "#34d399",
+  "#a3e635",
+  "#2dd4bf",
+  "#4ade80",
+  "#14b8a6",
+];
+
+const KIGALI_CENTER: [number, number] = [-1.9441, 30.0619];
 
 const getMarkerIcon = (user: UserJourneyState, color: string) =>
   L.divIcon({
@@ -46,19 +73,28 @@ function FitToUsers({ users }: { users: UserJourneyState[] }) {
   const map = useMap();
 
   useEffect(() => {
-    const activeUsers = users.filter((user) => user.active && user.lastLocation);
+    const activeUsers = users.filter(
+      (user) => user.active && user.lastLocation,
+    );
 
     if (!activeUsers.length) {
-      map.setView([0, 0], 2);
+      map.setView(KIGALI_CENTER, 13);
       return;
     }
 
     const points = activeUsers.flatMap((user) =>
       user.path.length
-        ? user.path.map((point) => [point.latitude, point.longitude] as [number, number])
+        ? user.path.map(
+            (point) => [point.latitude, point.longitude] as [number, number],
+          )
         : user.lastLocation
-          ? [[user.lastLocation.latitude, user.lastLocation.longitude] as [number, number]]
-          : []
+          ? [
+              [user.lastLocation.latitude, user.lastLocation.longitude] as [
+                number,
+                number,
+              ],
+            ]
+          : [],
     );
 
     if (!points.length) {
@@ -157,43 +193,96 @@ export default function AdminLiveMap({
   }, [onDriversChange, token]);
 
   const visibleUsers = useMemo(
-    () => users.filter((user) => user.active && (!selectedDriverId || user.userId === selectedDriverId)),
-    [selectedDriverId, users]
+    () =>
+      users.filter(
+        (user) =>
+          user.active &&
+          (!selectedDriverId || user.userId === selectedDriverId),
+      ),
+    [selectedDriverId, users],
   );
 
   return (
     <Box sx={{ display: "grid", gap: 2 }}>
-      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
-        <FormControl size="small" sx={{ minWidth: 220 }}>
-          <InputLabel id="active-driver-label">Driver on map</InputLabel>
-          <Select
-            labelId="active-driver-label"
-            value={selectedDriverId}
-            label="Driver on map"
-            onChange={(event) => onSelectedDriverChange(event.target.value)}
-          >
-            <MenuItem value="">All active drivers</MenuItem>
-            {users.filter((user) => user.active).map((user) => (
-              <MenuItem key={user.userId} value={user.userId}>
-                {user.name} · {user.vehicleNumber || "Unassigned"}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <Chip
-          label={socketConnected ? "Realtime socket" : apiConnected ? "Live polling fallback" : "Connecting..."}
+      <Stack
+        direction="row"
+        spacing={1}
+        sx={{
+          flexWrap: "wrap",
+          flexDirection: { xs: "column", sm: "row" },
+          alignItems: { xs: "flex-start", sm: "center" },
+          gap: 1,
+          justifyContent: "space-between",
+        }}
+      >
+        <Typography
+          variant="h4"
+          sx={{
+            fontWeight: 800,
+            mb: 1,
+            color: "#f8fafc",
+            textTransform: "uppercase",
+            textAlign: "center",
+            width: { xs: "100%", sm: "auto" },
+          }}
+        >
+          Tracker
+        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: { xs: "row", sm: "row" },
+            alignItems: { xs: "flex-start", sm: "center" },
+            gap: 1,
+            justifyContent: "space-between",
+          }}
+        >
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="active-driver-label">Driver on map</InputLabel>
+            <Select
+              labelId="active-driver-label"
+              value={selectedDriverId}
+              label="Driver on map"
+              onChange={(event) => onSelectedDriverChange(event.target.value)}
+            >
+              <MenuItem value="">All active drivers</MenuItem>
+              {users
+                .filter((user) => user.active)
+                .map((user) => (
+                  <MenuItem key={user.userId} value={user.userId}>
+                    {user.name} · {user.vehicleNumber || "Unassigned"}
+                  </MenuItem>
+                ))}
+            </Select>
+          </FormControl>
+          {/* <Chip
+          label={
+            socketConnected
+              ? "Realtime socket"
+              : apiConnected
+                ? "Live polling fallback"
+                : "Connecting..."
+          }
           color={socketConnected || apiConnected ? "success" : "warning"}
-        />
-        <Chip label={`${visibleUsers.length} user(s)`} color="primary" />
+        /> */}
+          <Typography>{visibleUsers.length}</Typography>
+        </Box>
       </Stack>
 
-      <Card sx={{ overflow: "hidden", borderRadius: 3 }}>
+      <Card sx={{ overflow: "hidden", borderRadius: 1 }}>
         <CardContent sx={{ p: 0 }}>
           <Box sx={{ height: { xs: 340, sm: 440, md: 540 }, width: "100%" }}>
-            <MapContainer center={[0, 0]} zoom={2} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
+            <MapContainer
+              center={KIGALI_CENTER}
+              zoom={13}
+              maxZoom={20}
+              scrollWheelZoom
+              style={{ height: "100%", width: "100%" }}
+            >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                maxNativeZoom={19}
               />
               <FitToUsers users={visibleUsers} />
 
@@ -204,19 +293,29 @@ export default function AdminLiveMap({
 
                 const latest = user.lastLocation;
                 const route = user.path.length ? user.path : [latest];
-                const color = ACTIVE_PATH_COLORS[index % ACTIVE_PATH_COLORS.length];
+                const color =
+                  ACTIVE_PATH_COLORS[index % ACTIVE_PATH_COLORS.length];
 
                 return (
                   <div key={user.userId}>
                     <Polyline
-                      positions={route.map((point) => [point.latitude, point.longitude] as [number, number])}
+                      positions={route.map(
+                        (point) =>
+                          [point.latitude, point.longitude] as [number, number],
+                      )}
                       pathOptions={{ color, weight: 5 }}
                     />
 
-                    <Marker position={[latest.latitude, latest.longitude]} icon={getMarkerIcon(user, color)}>
+                    <Marker
+                      position={[latest.latitude, latest.longitude]}
+                      icon={getMarkerIcon(user, color)}
+                    >
                       <Popup>
                         <Box sx={{ minWidth: 180 }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
+                          <Typography
+                            variant="subtitle2"
+                            sx={{ fontWeight: 800, mb: 0.5 }}
+                          >
                             {user.name}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
@@ -227,13 +326,15 @@ export default function AdminLiveMap({
                                 : "Available for deliveries"}
                           </Typography>
                           <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>Vehicle:</strong> {user.vehicleNumber || "Unassigned"}
+                            <strong>Vehicle:</strong>{" "}
+                            {user.vehicleNumber || "Unassigned"}
                           </Typography>
                           <Typography variant="body2">
                             <strong>Phone:</strong> {user.phoneNumber || "N/A"}
                           </Typography>
                           <Typography variant="body2">
-                            <strong>Last seen:</strong> {new Date(latest.timestamp).toLocaleTimeString()}
+                            <strong>Last seen:</strong>{" "}
+                            {new Date(latest.timestamp).toLocaleTimeString()}
                           </Typography>
                         </Box>
                       </Popup>
@@ -255,7 +356,14 @@ export default function AdminLiveMap({
           visibleUsers.map((user, index) => (
             <Card key={user.userId} variant="outlined">
               <CardContent>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2 }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 2,
+                  }}
+                >
                   <Box>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                       <Box
@@ -264,7 +372,10 @@ export default function AdminLiveMap({
                           width: 14,
                           height: 14,
                           borderRadius: "50%",
-                          backgroundColor: ACTIVE_PATH_COLORS[index % ACTIVE_PATH_COLORS.length],
+                          backgroundColor:
+                            ACTIVE_PATH_COLORS[
+                              index % ACTIVE_PATH_COLORS.length
+                            ],
                           flexShrink: 0,
                         }}
                       />
@@ -281,7 +392,8 @@ export default function AdminLiveMap({
                     </Typography>
                     <Box component="div" sx={{ mt: 0.5 }}>
                       <Typography variant="caption" color="text.secondary">
-                        {user.vehicleNumber || "Unassigned"} • {user.phoneNumber || "N/A"}
+                        {user.vehicleNumber || "Unassigned"} •{" "}
+                        {user.phoneNumber || "N/A"}
                       </Typography>
                     </Box>
                   </Box>
@@ -290,10 +402,13 @@ export default function AdminLiveMap({
                     {user.lastLocation ? (
                       <>
                         <Typography variant="body2">
-                          {user.lastLocation.latitude.toFixed(5)}, {user.lastLocation.longitude.toFixed(5)}
+                          {user.lastLocation.latitude.toFixed(5)},{" "}
+                          {user.lastLocation.longitude.toFixed(5)}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {new Date(user.lastLocation.timestamp).toLocaleTimeString()}
+                          {new Date(
+                            user.lastLocation.timestamp,
+                          ).toLocaleTimeString()}
                         </Typography>
                       </>
                     ) : (

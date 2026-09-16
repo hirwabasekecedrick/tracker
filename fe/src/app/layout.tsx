@@ -16,11 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: {
-    default: "Delivery Tracker",
-    template: "%s · Delivery Tracker",
-  },
-  description: "Realtime delivery fleet tracking and journey review for drivers and dispatchers.",
+  title: "Tracker",
+  description: "A Product of by by DEMLA",
 };
 
 export default function RootLayout({

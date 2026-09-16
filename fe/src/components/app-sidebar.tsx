@@ -19,7 +19,7 @@ function NavigationItems({ user, onNavigate }: { user: AppUser; onNavigate?: () 
     <List>
       <ListItemButton component="a" href={isAdmin ? "/admin" : "/driver"} onClick={onNavigate}>
         <ListItemIcon><MapIcon /></ListItemIcon>
-        <ListItemText primary={isAdmin ? "Live dispatch map" : "My live route"} />
+        <ListItemText primary={isAdmin ? "Live console" : "My Console"} />
       </ListItemButton>
       {isAdmin ? (
         <ListItemButton component="a" href="/admin/history" onClick={onNavigate}>
@@ -52,7 +52,7 @@ export default function AppSidebar({ user, mobileOpen, onMobileClose }: AppSideb
         </Box>
       </Drawer>
 
-      <Box component="aside" sx={{ display: { xs: "none", md: "block" }, width: 240, flexShrink: 0, p: 2, borderRight: "1px solid rgba(148, 163, 184, 0.18)" }}>
+      <Box component="aside" sx={{ display: { xs: "none", md: "block" }, width: 240, flexShrink: 0, height: "100%", overflow: "hidden", p: 2, borderRight: "1px solid rgba(148, 163, 184, 0.18)" }}>
         <Typography variant="overline" sx={{ color: "#94a3b8", letterSpacing: 1.5 }}>Workspace</Typography>
         <NavigationItems user={user} />
       </Box>

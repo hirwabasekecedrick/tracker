@@ -13,6 +13,8 @@ const riderIcon = L.divIcon({
   iconAnchor: [18, 18],
 });
 
+const KIGALI_CENTER: [number, number] = [-1.9441, 30.0619];
+
 function FollowRider({ location }: { location: LocationPoint | null }) {
   const map = useMap();
 
@@ -27,7 +29,7 @@ function FollowRider({ location }: { location: LocationPoint | null }) {
 
 export default function DriverLiveMap({ path }: { path: LocationPoint[] }) {
   const latest = path.at(-1) || null;
-  const center: [number, number] = latest ? [latest.latitude, latest.longitude] : [0, 0];
+  const center: [number, number] = latest ? [latest.latitude, latest.longitude] : KIGALI_CENTER;
 
   return (
     <Box sx={{ display: "grid", gap: 1 }}>
@@ -35,10 +37,11 @@ export default function DriverLiveMap({ path }: { path: LocationPoint[] }) {
         Your live route
       </Typography>
       <Box sx={{ height: 300, width: "100%", overflow: "hidden", borderRadius: 2 }}>
-        <MapContainer center={center} zoom={latest ? 15 : 2} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
+        <MapContainer center={center} zoom={latest ? 16 : 13} maxZoom={20} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            maxNativeZoom={19}
           />
           <FollowRider location={latest} />
           {path.length > 1 ? (

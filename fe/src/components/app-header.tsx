@@ -37,10 +37,7 @@ export default function AppHeader({ user, isAdmin, onMenuClick, onLogout }: AppH
           </IconButton>
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1.1 }}>
-              {isAdmin ? "Dispatch Console" : "Rider Operations"}
-            </Typography>
-            <Typography variant="caption" sx={{ color: "#94a3b8" }}>
-              {isAdmin ? "Fleet command center" : "Active delivery workspace"}
+              {isAdmin ? "Admin Console" : "Rider Console"}
             </Typography>
           </Box>
         </Box>

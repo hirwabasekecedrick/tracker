@@ -1,9 +1,7 @@
 "use client";
 
 import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from "@mui/material";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
-import AuthenticatedShell from "@/components/authenticated-shell";
 import type { AppUser } from "@/lib/auth";
 import { useAuthSession } from "@/lib/auth-session";
 import { useDriverProfile } from "@/lib/driver-profile";
@@ -62,8 +60,7 @@ function DriverProfileForm({ user }: { user: AppUser }) {
 }
 
 export default function DriverProfilePage() {
-  const router = useRouter();
-  const { user, token, logout } = useAuthSession();
+  const { user, token } = useAuthSession();
   const authorized = user?.role === "driver" && Boolean(token);
   useAuthRedirect("driver", authorized);
 
@@ -72,19 +69,17 @@ export default function DriverProfilePage() {
   }
 
   return (
-    <AuthenticatedShell user={user} onLogout={() => { logout(); router.replace("/login"); }}>
-      <Box sx={{ display: "grid", gap: 2, width: "100%", maxWidth: 640 }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 800, mb: 1, color: "#f8fafc" }}>
-            Profile
-          </Typography>
-          <Typography variant="body1" sx={{ mb: 2, color: "#cbd5e1" }}>
-            These details are attached to every journey you record.
-          </Typography>
-        </Box>
-
-        <DriverProfileForm key={user.id} user={user} />
+    <Box sx={{ display: "grid", gap: 2, width: "100%", maxWidth: 640 }}>
+      <Box>
+        <Typography variant="h4" sx={{ fontWeight: 800, mb: 1, color: "#f8fafc" }}>
+          Profile
+        </Typography>
+        <Typography variant="body1" sx={{ mb: 2, color: "#cbd5e1" }}>
+          These details are attached to every journey you record.
+        </Typography>
       </Box>
-    </AuthenticatedShell>
+
+      <DriverProfileForm key={user.id} user={user} />
+    </Box>
   );
 }
